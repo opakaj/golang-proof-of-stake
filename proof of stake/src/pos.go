@@ -51,22 +51,23 @@ type Blockchain struct {
 	blockChain  []map[string]interface{}
 	tempBlocks  []map[string]interface{}
 	myCurrBlock map[string]interface{}
-	validators  map[interface{}]*Blockchain //set
+	validators  []interface{} //set
 	nodes       map[interface{}]*Blockchain
 	myAccount   map[string]interface{}
 }
 
-func NewBlockchain(_genesisBlock map[string]interface{}, account map[string]interface{}) (B *Blockchain) {
+func NewBlockchain(genesisBlock map[string]interface{}, account map[string]interface{}) (B *Blockchain) {
 	B = new(Blockchain)
 	//If the genesis block is valid, create chain
 	B.blockChain = []map[string]interface{}{}
 	B.tempBlocks = []map[string]interface{}{}
 	B.myCurrBlock = map[string]interface{}{}
-	B.validators = map[interface{}]*Blockchain{} //set
+	B.validators = []interface{}{} //set
 	B.nodes = map[interface{}]*Blockchain{}
 	B.myAccount = map[string]interface{}{"Address": "", "Weight": 0, "Age": 0}
 	B.myAccount["Address"] = account["Address"]
 	B.myAccount["Weight"] = account["Weight"]
+	//try generating the genesis block, otherwise, return an error
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -78,7 +79,8 @@ func NewBlockchain(_genesisBlock map[string]interface{}, account map[string]inte
 				panic(r)
 			}
 		}()
-		genesisBlock := B.generateGenesisBlock(_genesisBlock)
+		genesisBlock := B.generateGenesisBlock(genesisBlock)
+		//if it is valid, add it to the blockchain
 		if B.isBlockValid(genesisBlock.(map[string]interface{}), nil) {
 			B.blockChain = append(B.blockChain, genesisBlock.(map[string]interface{}))
 		} else {
@@ -101,12 +103,14 @@ func (B *Blockchain) isBlockValid(block map[string]interface{}, prevBlock map[st
 		}
 		return false
 	}()
-	_hash := func(s *map[string]interface{}, h string) string {
-		i := len(*s) - 1
-		popped := (*s)[i]
-		*s = append((*s)[:i], (*s)[i+1:]...)
-		return popped
+	_hash := func(s *map[string]interface{}, h string) interface{} {
+		if _, ok := block["Hash"]; ok {
+			return block["Hash"]
+			delete(block, h)
+		}
+		return block["Hash"]
 	}(&block, "Hash")
+
 	defer func() bool {
 		if r := recover(); r != nil {
 			if err, ok := r.(error); ok {
@@ -122,6 +126,7 @@ func (B *Blockchain) isBlockValid(block map[string]interface{}, prevBlock map[st
 	if !(_hash == string(hash2)) {
 		panic(errors.New("AssertionError"))
 	}
+
 	prevHash := func() string {
 		if prevBlock != nil {
 			return prevBlock["Hash"].(string)
@@ -218,16 +223,17 @@ func (B *Blockchain) getBlocksFromNodes() {
 			node.addAnotherBlock(B.myCurrBlock)
 			resp := node.generateNewBlock(0)
 			if B.isBlockValid(resp, nil) {
+				//if resp[validator] is not in validator map
 				if !(func() int {
 					for i, v := range B.validators {
 						if v == resp["Validator"] {
-							return i.(int)
+							return i
 						}
 					}
 					return -1
 				}() != -1) {
 					B.tempBlocks = append(B.tempBlocks, resp)
-					B.validators[resp["Validator"]] = B
+					B.validators = append(B.validators, resp["Validator"])
 				}
 			}
 		}
@@ -240,13 +246,13 @@ func (B *Blockchain) addAnotherBlock(anotherBlock map[string]interface{}) {
 		if !(func() int {
 			for i, v := range B.validators {
 				if reflect.DeepEqual(v, anotherBlock["Validator"]) {
-					return i.(int)
+					return i
 				}
 			}
 			return -1
 		}() != -1) {
 			B.tempBlocks = append(B.tempBlocks, anotherBlock)
-			B.validators[anotherBlock["Validator"]] = B
+			B.validators = append(B.validators, anotherBlock["Validator"])
 		}
 	}
 }
@@ -256,15 +262,18 @@ func (B *Blockchain) pickWinner() []string {
 	//Creates a lottery pool of validators and choose the validator
 	//who gets to forge the next block. Random selection weighted by amount of token staked
 	//Do this every 30 seconds
-	winner := []string{}
+	var winner []string
 	B.tempBlocks = append(B.tempBlocks, B.myCurrBlock)
-	B.validators[B.myCurrBlock["Validator"]] = B
+	B.validators = append(B.validators, B.myCurrBlock["Validator"])
 	for _, validator := range B.validators {
-		acct = validator.rsplit(", ")
+		acct = strings.Fields(validator.(string))
 		s1, _ := strconv.Atoi(acct[1])
 		s2, _ := strconv.Atoi(acct[2])
-		acct = append(acct, s1*s2)
-		if winner && acct[len(acct)-1] {
+		//this better work!
+		s3, _ := strconv.Atoi(winner[len(acct)-1])
+		s4, _ := strconv.Atoi(acct[len(acct)-1])
+		acct = append(acct, string(s1*s2))
+		if s3 & s4 {
 			winner = func() []string {
 				if winner[len(winner)-1] < acct[len(acct)-1] {
 					return acct
@@ -285,8 +294,9 @@ func (B *Blockchain) pickWinner() []string {
 		return winner
 	}
 	for _, validator := range B.validators {
-		acct := validator.rsplit(", ")
-		acct = append(acct, float64(int(acct[1])+int(acct[2]))/len(acct[0]))
+		acct := strings.Fields(validator.(string))
+		//not comfortable with whats going on here
+		acct = append(acct, acct[1]+acct[2])
 		if len(winner) != 0 {
 			winner = func() []string {
 				if winner[len(winner)-1] < acct[len(acct)-1] {
@@ -354,7 +364,7 @@ func (B *Blockchain) addNewBlock(block map[string]interface{}) {
 	}
 	B.tempBlocks = []map[string]interface{}{}
 	B.myCurrBlock = map[string]interface{}{}
-	B.validators = map[interface{}]*Blockchain{}
+	B.validators = []interface{}{}
 }
 
 func (B *Blockchain) _pos() {
